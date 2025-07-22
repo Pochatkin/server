@@ -2859,6 +2859,11 @@ public:
       const_item_cache= args[0]->const_item();
     }
   }
+  /*
+    transform argv[0] with const_item_cache == 1 above,
+    so used_tables_cache is actually 0
+  */
+  Item *const_expr_xformer_for_derived_pushdown(THD *thd, uchar *arg) override;
   COND *remove_eq_conds(THD *thd, Item::cond_result *cond_value,
                         bool top_level) override;
   table_map not_null_tables() const override { return 0; }

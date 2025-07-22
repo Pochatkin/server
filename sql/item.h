@@ -2599,6 +2599,8 @@ public:
   { return this; }
   virtual Item *field_transformer_for_having_pushdown(THD *thd, uchar *arg)
   { return this; }
+  virtual Item *const_expr_xformer_for_derived_pushdown(THD *thd, uchar *arg)
+  { return this; }
   virtual Item *multiple_equality_transformer(THD *thd, uchar *arg);
   virtual bool expr_cache_is_needed(THD *) { return FALSE; }
   virtual Item *safe_charset_converter(THD *thd, CHARSET_INFO *tocs);

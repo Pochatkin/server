@@ -6740,6 +6740,20 @@ Item *Item_func_isnull::neg_transformer(THD *thd)
 }
 
 
+Item *Item_func_isnull::const_expr_xformer_for_derived_pushdown(THD *thd,
+                                                               uchar *arg)
+{
+  if (const_item_cache)         // set in update_used_tables()
+  {
+    if (Item *item= new (thd->mem_root) Item_int(thd, 1))
+      args[0]= item;
+    else
+      return 0;
+  }
+  return this;
+}
+
+
 /**
   a IS NOT NULL  ->  a IS NULL.
 */

@@ -761,9 +761,11 @@ void log_t::header_rewrite(my_bool archive) noexcept
 
 /** SET GLOBAL innodb_log_archive
 @param archive  the new value of innodb_log_archive
-@param thd      SQL connection */
-void log_t::set_archive(my_bool archive, THD *thd) noexcept
+@param thd      SQL connection
+@return whether the operation failed */
+bool log_t::set_archive(my_bool archive, THD *thd) noexcept
 {
+  bool fail= false;
   thd_wait_begin(thd, THD_WAIT_DISKIO);
   tpool::tpool_wait_begin();
 
@@ -775,17 +777,19 @@ void log_t::set_archive(my_bool archive, THD *thd) noexcept
       my_printf_error(ER_WRONG_USAGE,
                       "SET GLOBAL innodb_log_file_size is in progress",
                       MYF(0));
+    fail:
+      fail= true;
       break;
     }
     if (archive && file_size > ARCHIVE_FILE_SIZE_MAX)
     {
       my_printf_error(ER_WRONG_USAGE, "innodb_log_file_size>4G", MYF(0));
-      break;
+      goto fail;
     }
     if (archive == this->archive)
       break;
     if (thd_kill_level(thd))
-      break;
+      goto fail;
 
     lsn_t wait_lsn;
 
@@ -894,7 +898,7 @@ void log_t::set_archive(my_bool archive, THD *thd) noexcept
       if (!log.is_opened())
       {
         my_error(ER_ERROR_ON_READ, MYF(0), old_name, errno);
-        break;
+        goto fail;
       }
     }
 #endif
@@ -919,7 +923,7 @@ void log_t::set_archive(my_bool archive, THD *thd) noexcept
     {
       my_error(ER_ERROR_ON_RENAME, MYF(0), old_name, new_name, my_errno);
       first_lsn= old_first_lsn;
-      break;
+      goto fail;
     }
 
     if (archive)
@@ -937,6 +941,7 @@ void log_t::set_archive(my_bool archive, THD *thd) noexcept
   IF_WIN(log_resize_release(), latch.wr_unlock());
   tpool::tpool_wait_end();
   thd_wait_end(thd);
+  return fail;
 }
 
 /** Start resizing the log and release the exclusive latch.

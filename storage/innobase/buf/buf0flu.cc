@@ -2007,7 +2007,10 @@ inline void log_t::write_checkpoint(lsn_t checkpoint, lsn_t end_lsn) noexcept
   last_checkpoint_lsn= checkpoint;
   this->end_lsn= end_lsn;
   if (!archive)
+  {
+    archived_checkpoint= checkpoint;
     archived_lsn= end_lsn;
+  }
   else if (archive_header_was_reset)
   {
     ut_ad(resize_log.m_file != log.m_file);

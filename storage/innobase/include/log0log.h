@@ -290,8 +290,9 @@ public:
   Atomic_relaxed<lsn_t> last_checkpoint_lsn;
   /** The log writer (protected by latch.wr_lock()) */
   lsn_t (*writer)() noexcept;
-  /** end_lsn of the first available checkpoint, or 0;
-  protected by latch.wr_lock() */
+  /** the earliest available checkpoint; protected by latch.wr_lock() */
+  lsn_t archived_checkpoint;
+  /** end_lsn of archived_checkpoint; protected by latch.wr_lock() */
   lsn_t archived_lsn;
 
   /** Log file */
@@ -401,8 +402,9 @@ public:
 
   /** SET GLOBAL innodb_log_archive
   @param archive  the new value of innodb_log_archive
-  @param thd      SQL connection */
-  void set_archive(my_bool archive, THD *thd) noexcept;
+  @param thd      SQL connection
+  @return whether the operation failed */
+  bool set_archive(my_bool archive, THD *thd) noexcept;
 
 private:
   /** Replicate a write to the log.

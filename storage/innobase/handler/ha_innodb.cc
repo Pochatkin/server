@@ -151,6 +151,7 @@ void close_thread_tables(THD* thd);
 
 #include "ha_innodb.h"
 #include "i_s.h"
+#include "backup_innodb.h"
 
 #include <string>
 #include <sstream>
@@ -4182,6 +4183,10 @@ static int innodb_init(void* p)
 		= innodb_prepare_commit_versioned;
 
         innobase_hton->update_optimizer_costs= innobase_update_optimizer_costs;
+	innobase_hton->backup_start = innodb_backup_start;
+	innobase_hton->backup_step = innodb_backup_step;
+	innobase_hton->backup_end = innodb_backup_end;
+	innobase_hton->backup_finalize = innodb_backup_finalize;
         innobase_hton->binlog_init= innodb_binlog_init;
         innobase_hton->set_binlog_max_size= ibb_set_max_size;
         innobase_hton->binlog_write_direct_ordered=
@@ -19764,10 +19769,20 @@ static MYSQL_SYSVAR_UINT64_T(log_archive_start, innodb_log_archive_start,
   "initial value of innodb_lsn_archived; 0=auto-detect",
   nullptr, nullptr, 0, 0, std::numeric_limits<uint64_t>::max(), 0);
 
+static void innodb_log_recovery_start_update(THD *, st_mysql_sys_var*,
+                                             void *, const void *save) noexcept
+{
+  const lsn_t lsn{*static_cast<const uint64_t*>(save)};
+  recv_sys.recovery_start= lsn;
+  if (lsn && log_sys.archive)
+    log_sys.archived_checkpoint= lsn;
+}
+
 static MYSQL_SYSVAR_UINT64_T(log_recovery_start, recv_sys.recovery_start,
-  PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
+  PLUGIN_VAR_RQCMDARG,
   "LSN to start recovery from (0=automatic)",
-  nullptr, nullptr, 0, 0, std::numeric_limits<uint64_t>::max(), 0);
+  nullptr, innodb_log_recovery_start_update,
+  0, 0, std::numeric_limits<uint64_t>::max(), 0);
 
 static MYSQL_SYSVAR_UINT64_T(log_recovery_target, recv_sys.rpo,
   PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,

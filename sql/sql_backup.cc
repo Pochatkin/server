@@ -14,16 +14,18 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 #include "my_global.h"
+#include "mysys_err.h"
 #include "sql_class.h"
 #include "sql_backup.h"
 #include "sql_parse.h"
 
-static my_bool backup_start(THD *thd, plugin_ref plugin, void *target)
-  noexcept
+static my_bool backup_start(THD *thd, plugin_ref plugin, void *dst) noexcept
 {
   handlerton *hton= plugin_hton(plugin);
   if (hton->backup_start)
-    return hton->backup_start(thd, static_cast<LEX_CSTRING*>(target));
+    return hton->backup_start(thd,
+                              IF_WIN(static_cast<const char*>(dst),
+                                     int(reinterpret_cast<uintptr_t>(dst))));
   return false;
 }
 
@@ -64,10 +66,20 @@ bool Sql_cmd_backup::execute(THD *thd)
   if (my_mkdir(target.str, 0755, MYF(MY_WME)))
     return true;
 
+#ifndef _WIN32
+  int dir= open(target.str, O_DIRECTORY);
+  if (dir < 0)
+  {
+    my_error(EE_CANT_MKDIR,  MYF(ME_BELL), target.str, errno);
+    return true;
+  }
+#endif
+
   bool fail= plugin_foreach_with_mask(thd, backup_start,
                                       MYSQL_STORAGE_ENGINE_PLUGIN,
                                       PLUGIN_IS_DELETED|PLUGIN_IS_READY,
-                                      const_cast<LEX_CSTRING*>(&target));
+                                      IF_WIN(const_cast<char*>(target.str),
+                                             reinterpret_cast<void*>(dir)));
   if (!fail)
     fail= plugin_foreach_with_mask(thd, backup_step,
                                    MYSQL_STORAGE_ENGINE_PLUGIN,
@@ -79,6 +91,9 @@ bool Sql_cmd_backup::execute(THD *thd)
 
   plugin_foreach_with_mask(thd, backup_finalize, MYSQL_STORAGE_ENGINE_PLUGIN,
                            PLUGIN_IS_DELETED|PLUGIN_IS_READY, nullptr);
+#ifndef _WIN32
+  close(dir);
+#endif
 
   my_ok(thd);
   return false;

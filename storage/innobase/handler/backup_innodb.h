@@ -20,7 +20,7 @@
    @return error code
    @retval 0 on success
 */
-int innodb_backup_start(THD *thd, const LEX_CSTRING *target) noexcept;
+int innodb_backup_start(THD *thd, IF_WIN(const char*,int) target) noexcept;
 
 /**
    Process a file that was collected in backup_start().

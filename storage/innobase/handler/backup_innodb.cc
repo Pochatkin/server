@@ -21,6 +21,68 @@
 #include "fil0fil.h"
 #include <vector>
 
+#ifdef _WIN32
+/* We shall rely on CopyFileEx() */
+#elif defined __linux__
+# include <sys/sendfile.h>
+/* Copy a file to a stream or to a regular file. */
+static inline ssize_t sendfile_step(int in_fd, int out_fd, size_t count)
+  noexcept
+{
+  return sendfile(out_fd, in_fd, nullptr, count);
+}
+
+/* Copy between files in a single (type of) file system */
+static inline ssize_t copy_file_range_step(int in_fd, int out_fd, size_t count)
+  noexcept
+{
+  return copy_file_range(in_fd, nullptr, out_fd, nullptr, count, 0);
+}
+
+using copying_step= ssize_t(int,int,size_t);
+template<copying_step copy_step>
+/*static*/ ssize_t copy(int in_fd, int out_fd, off_t c) noexcept
+{
+  ssize_t ret;
+  for (;;) {
+    off_t count= c;
+    if (count > INT_MAX >> 20 << 20)
+      count = INT_MAX >> 20 << 20;
+    ret= copy_step(in_fd, out_fd, (size_t) count);
+    if (ret < 0)
+      break;
+    c-= ret;
+    if (!c)
+      return 0;
+    if (!ret)
+      return -1;
+  }
+  return ret;
+}
+
+template ssize_t copy<sendfile_step>(int,int,off_t) noexcept;
+template ssize_t copy<copy_file_range_step>(int,int,off_t) noexcept;
+
+/* TODO: if copy_file_range(2) fails with errno=EOPNOTSUPP,
+fall back to sendfile(2) */
+#elif defined __APPLE__
+# include <sys/attr.h>
+# include <sys/clonefile.h>
+/*
+int fclonefileat(int srcfd, int dst_dirfd, const char * dst, int flags);
+
+fclonefileat()
+if (errno == ENOTSUP) invoke fcopyfile()
+
+int
+fcopyfile(int from, int to, copyfile_state_t state, copyfile_flags_t flags);
+static inline ssize_t copy_file_rw(int in_fd, int out_fd, size_t count)
+{
+  ssize_t r= read(..);
+}
+*/
+#endif
+
 namespace
 {
 class InnoDB_backup
@@ -34,8 +96,8 @@ class InnoDB_backup
   /** collection of files to be copied */
   std::vector<uint32_t> queue;
 
-  /** name of the target directory */
-  const LEX_CSTRING *target;
+  /** target directory name or handle */
+  IF_WIN(const char*,int) target;
 
   /** the checkpoint from which the backup starts */
   lsn_t checkpoint;
@@ -49,7 +111,7 @@ public:
      @return error code
      @retval 0 on success
   */
-  int init(THD *thd, const LEX_CSTRING *target) noexcept
+  int init(THD *thd, IF_WIN(const char*,int) target) noexcept
   {
     mysql_mutex_lock(&LOCK_global_system_variables);
     mutex.init();
@@ -124,10 +186,13 @@ public:
 
     if (fil_space_t *space= fil_space_t::get(id))
     {
-      /* TODO: copy the file to target safely, even when there may be
-      concurrent buf_page_t::flush() to this tablespace */
-      sql_print_information("BACKUP SERVER: copy %s",
-                            UT_LIST_GET_FIRST(space->chain)->name);
+      for (fil_node_t *node= UT_LIST_GET_FIRST(space->chain); node;
+           node= UT_LIST_GET_NEXT(chain, node))
+        if (int res= backup(node))
+        {
+          space->release();
+          return res;
+        }
       space->release();
     }
 
@@ -168,13 +233,22 @@ public:
       log_sys.set_archive(false, thd);
     mysql_mutex_unlock(&LOCK_global_system_variables);
   }
+
+private:
+  int backup(fil_node_t *node) noexcept
+  {
+    /* TODO: copy the file to target safely, even when there may be
+    concurrent buf_page_t::flush() to this tablespace */
+    sql_print_information("BACKUP SERVER: copy %s", node->name);
+    return 0;
+  }
 };
 
 /** The backup context */
 static InnoDB_backup backup;
 }
 
-int innodb_backup_start(THD *thd, const LEX_CSTRING *target) noexcept
+int innodb_backup_start(THD *thd, IF_WIN(const char*,int) target) noexcept
 {
   return backup.init(thd, target);
 }

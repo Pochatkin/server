@@ -1905,7 +1905,7 @@ struct handlerton : public transaction_participant
      @return error code
      @retval 0 on success
   */
-  int (*backup_start)(THD *thd, const LEX_CSTRING *target);
+  int (*backup_start)(THD *thd, IF_WIN(const char*,int) target);
   /**
      Process a file that was collected in backup_start().
      @param thd   current session

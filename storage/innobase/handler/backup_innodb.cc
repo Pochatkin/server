@@ -302,7 +302,7 @@ private:
     std::string path{target};
     path.push_back('/');
     path.append(node->name);
-    if (!CopyFileExA(node->name, path, nullptr, nullptr, false,
+    if (!CopyFileExA(node->name, path.c_str(), nullptr, nullptr, false,
                      COPY_FILE_NO_BUFFERING))
     {
       /* TODO: try_mkdir */
@@ -358,25 +358,29 @@ private:
       goto fail;
     return 0;
 # else
-    off_t size= off_t{node->size} * node->space->physical_size();
-#  if defined __linux__ || defined __FreeBSD__
-    if (!copy<copy_step>(node->handle, f, size));
-    else if (errno != EOPNOTSUPP || copy<send_step>(node->handle, f, size))
+    do
     {
-      std::ignore= close(f);
-      goto fail;
-    }
+      const off_t size= off_t{node->size} * node->space->physical_size();
+#  if defined __linux__ || defined __FreeBSD__
+      if (!copy<copy_step>(node->handle, f, size))
+        continue;
+#   ifdef __linux__
+      if (errno == EOPNOTSUPP && !copy<send_step>(node->handle, f, size))
+        continue;
+#   endif
 #  endif
 #  ifndef __linux__ // starting with Linux 2.6.33, we can rely on sendfile(2)
-    ssize_t err= mmap_copy(node->handle, f, size);
-    if (err == 1)
-      err= pread_write(node->handle, f, size);
-    if (err)
-    {
+      ssize_t err= mmap_copy(node->handle, f, size);
+      if (err == 1)
+        err= pread_write(node->handle, f, size);
+      if (!err)
+        continue;
+#  endif
       std::ignore= close(f);
       goto fail;
     }
-#  endif
+    while (false);
+
     if (close(f))
       goto fail;
 

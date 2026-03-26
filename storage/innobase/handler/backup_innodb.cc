@@ -311,6 +311,8 @@ private:
                       node->name, path, GetLastError());
       return -1;
     }
+    sql_print_information("BACKUP SERVER: copy %s", node->name);
+    return 0;
 #else
     bool tried_mkdir{false};
   retry:

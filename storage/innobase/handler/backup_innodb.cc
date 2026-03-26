@@ -22,33 +22,113 @@
 #include <vector>
 
 #ifdef _WIN32
-/* We shall rely on CopyFileEx() */
-#elif defined __linux__
-# include <sys/sendfile.h>
+#elif defined __APPLE__
+# include <sys/attr.h>
+# include <sys/clonefile.h>
+#else
+# ifdef __linux__
+#  include <sys/sendfile.h>
 /* Copy a file to a stream or to a regular file. */
-static inline ssize_t sendfile_step(int in_fd, int out_fd, size_t count)
-  noexcept
+static inline ssize_t
+send_step(int in_fd, int out_fd, size_t count, off_t *offset) noexcept
 {
-  return sendfile(out_fd, in_fd, nullptr, count);
+  return sendfile(out_fd, in_fd, offset, count);
 }
-
+# endif
+# if defined __linux__ || defined __FreeBSD__
 /* Copy between files in a single (type of) file system */
-static inline ssize_t copy_file_range_step(int in_fd, int out_fd, size_t count)
-  noexcept
+static inline ssize_t
+copy_step(int in_fd, int out_fd, size_t count, off_t *offset) noexcept
 {
-  return copy_file_range(in_fd, nullptr, out_fd, nullptr, count, 0);
+  return copy_file_range(in_fd, offset, out_fd, nullptr, count, 0);
+}
+# endif
+# ifndef __linux__
+#  include <sys/mman.h>
+/** Copy a file using a memory mapping.
+@param in_fd   source file
+@param out_fd  destination
+@param count   number of bytes to copy
+@return error code
+@retval 0  on success
+@retval 1  if a memory mapping failed */
+static ssize_t mmap_copy(int in_fd, int out_fd, off_t count)
+{
+#if SIZEOF_SIZE_T < 8
+  if (count != ssize_t(count))
+    return 1;
+#endif
+#if 1
+  return 1;
+#endif
+  void *p= mmap(nullptr, count, PROT_READ, MAP_SHARED, in_fd, 0);
+  if (p == MAP_FAILED)
+    return 1;
+  ssize_t ret;
+  size_t c= size_t(count);
+  for (const char *b= static_cast<const char*>(p);; b+= ret)
+  {
+    ret= write(out_fd, b, std::min(c, size_t(INT_MAX >> 20 << 20)));
+    if (ret < 0)
+      break;
+    c-= ret;
+    if (!c)
+    {
+      ret= 0;
+      break;
+    }
+    if (!ret)
+    {
+      ret= -1;
+      break;
+    }
+  }
+  munmap(p, count);
+  return ret;
 }
 
-using copying_step= ssize_t(int,int,size_t);
-template<copying_step copy_step>
-/*static*/ ssize_t copy(int in_fd, int out_fd, off_t c) noexcept
+static ssize_t pread_write(int in_fd, int out_fd, off_t count) noexcept
+{
+  constexpr size_t READ_WRITE_SIZE= 65536;
+  char *b= static_cast<char*>(aligned_malloc(READ_WRITE_SIZE, 4096));
+  if (!b)
+    return -1;
+  ssize_t ret;
+  for (off_t o= 0;; o+= ret)
+  {
+    ret= pread(in_fd, b, ssize_t(std::min(count, off_t{READ_WRITE_SIZE})), o);
+    if (ret > 0)
+      ret= write(out_fd, b, ret);
+    if (ret < 0)
+      break;
+    count-= ret;
+    if (!count)
+    {
+      ret= 0;
+      break;
+    }
+    if (!ret)
+    {
+      ret= -1;
+      break;
+    }
+  }
+  aligned_free(b);
+  return ret;
+}
+# endif
+
+using copying_step= ssize_t(int,int,size_t,off_t*);
+template<copying_step step>
+static ssize_t copy(int in_fd, int out_fd, off_t c) noexcept
 {
   ssize_t ret;
-  for (;;) {
+  for (off_t offset{0};;)
+  {
     off_t count= c;
     if (count > INT_MAX >> 20 << 20)
       count = INT_MAX >> 20 << 20;
-    ret= copy_step(in_fd, out_fd, (size_t) count);
+    ret= step(in_fd, out_fd, size_t(count), &offset);
     if (ret < 0)
       break;
     c-= ret;
@@ -59,28 +139,6 @@ template<copying_step copy_step>
   }
   return ret;
 }
-
-template ssize_t copy<sendfile_step>(int,int,off_t) noexcept;
-template ssize_t copy<copy_file_range_step>(int,int,off_t) noexcept;
-
-/* TODO: if copy_file_range(2) fails with errno=EOPNOTSUPP,
-fall back to sendfile(2) */
-#elif defined __APPLE__
-# include <sys/attr.h>
-# include <sys/clonefile.h>
-/*
-int fclonefileat(int srcfd, int dst_dirfd, const char * dst, int flags);
-
-fclonefileat()
-if (errno == ENOTSUP) invoke fcopyfile()
-
-int
-fcopyfile(int from, int to, copyfile_state_t state, copyfile_flags_t flags);
-static inline ssize_t copy_file_rw(int in_fd, int out_fd, size_t count)
-{
-  ssize_t r= read(..);
-}
-*/
 #endif
 
 namespace
@@ -239,8 +297,93 @@ private:
   {
     /* TODO: copy the file to target safely, even when there may be
     concurrent buf_page_t::flush() to this tablespace */
+
+#ifdef _WIN32
+    std::string path{target};
+    path.push_back('/');
+    path.append(node->name);
+    if (!CopyFileExA(node->name, path, nullptr, nullptr, false,
+                     COPY_FILE_NO_BUFFERING))
+    {
+      /* TODO: try_mkdir */
+      sql_print_error("InnoDB: BACKUP SERVER: failed to copy %s to %s,"
+                      " error %iE",
+                      node->name, path, GetLastError());
+      return -1;
+    }
+#else
+    bool tried_mkdir{false};
+  retry:
+# ifdef __APPLE__
+    if (!fclonefileat(node->handle, target, node->name, 0))
+      return 0;
+    switch (errno) {
+    case ENOENT:
+      goto try_mkdir;
+    case ENOTSUP:
+      break;
+    default:
+      goto fail;
+    }
+# endif
+    int f= openat(target, node->name, O_CREAT|O_EXCL|O_TRUNC|O_WRONLY,0666);
+    if (f < 0)
+    {
+      if (errno == ENOENT)
+      {
+# ifdef __APPLE__
+      try_mkdir:
+# endif
+        if (!tried_mkdir && node->space->id &&
+            !srv_is_undo_tablespace(node->space->id))
+        {
+          tried_mkdir= true;
+          const char *sep= strchr(node->name, '/');
+          ut_ad(sep);
+          sep= strchr(sep + 1, '/');
+          ut_ad(sep);
+          std::string dir{node->name, size_t(sep - node->name)};
+          if (!mkdirat(target, dir.c_str(), 0777) || errno == EEXIST)
+            goto retry;
+        }
+      }
+    fail:
+      my_error(ER_CANT_CREATE_FILE, MYF(0), node->name, errno);
+      return -1;
+    }
+# ifdef __APPLE__
+    int err=
+      fcopyfile(node->handle, f, nullptr, COPYFILE_ALL | COPYFILE_CLONE);
+    if (close(f) || err)
+      goto fail;
+    return 0;
+# else
+    off_t size= off_t{node->size} * node->space->physical_size();
+#  if defined __linux__ || defined __FreeBSD__
+    if (!copy<copy_step>(node->handle, f, size));
+    else if (errno != EOPNOTSUPP || copy<send_step>(node->handle, f, size))
+    {
+      std::ignore= close(f);
+      goto fail;
+    }
+#  endif
+#  ifndef __linux__ // starting with Linux 2.6.33, we can rely on sendfile(2)
+    ssize_t err= mmap_copy(node->handle, f, size);
+    if (err == 1)
+      err= pread_write(node->handle, f, size);
+    if (err)
+    {
+      std::ignore= close(f);
+      goto fail;
+    }
+#  endif
+    if (close(f))
+      goto fail;
+
     sql_print_information("BACKUP SERVER: copy %s", node->name);
     return 0;
+# endif
+#endif
   }
 };
 

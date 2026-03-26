@@ -15,6 +15,7 @@ SELECT * FROM t;
 
 let $datadir=`SELECT @@datadir`;
 --source include/shutdown_mysqld.inc
+--list_files $MYSQLTEST_VARDIR/some_directory
 #--rmdir $datadir
 #--move_file $MYSQLTEST_VARDIR/some_directory $datadir
 --rmdir $MYSQLTEST_VARDIR/some_directory

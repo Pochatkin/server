@@ -9,6 +9,12 @@ connection default;
 COMMIT;
 SELECT * FROM t;
 i
+ibdata1
+mysql
+test
+undo001
+undo002
+undo003
 # restart
 SELECT * FROM t;
 i

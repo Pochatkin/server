@@ -95,6 +95,7 @@ bool Sql_cmd_backup::execute(THD *thd)
   close(dir);
 #endif
 
-  my_ok(thd);
-  return false;
+  if (!fail)
+    my_ok(thd);
+  return fail;
 }

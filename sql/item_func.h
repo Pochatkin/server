@@ -966,33 +966,11 @@ public:
     Item_hybrid_func(thd, list)
   { collation= DTCollation_numeric(); }
 
-  double val_real() override
-  {
-    DBUG_ASSERT(fixed());
-    return Item_func_hybrid_field_type::type_handler()->
-           Item_func_hybrid_field_type_val_real(this);
-  }
-  longlong val_int() override
-  {
-    DBUG_ASSERT(!is_cond());
-    DBUG_ASSERT(fixed());
-    return Item_func_hybrid_field_type::type_handler()->
-           Item_func_hybrid_field_type_val_int(this);
-  }
-  my_decimal *val_decimal(my_decimal *dec) override
-  {
-    DBUG_ASSERT(fixed());
-    return Item_func_hybrid_field_type::type_handler()->
-           Item_func_hybrid_field_type_val_decimal(this, dec);
-  }
-  String *val_str(String*str) override
-  {
-    DBUG_ASSERT(fixed());
-    String *res= Item_func_hybrid_field_type::type_handler()->
-                 Item_func_hybrid_field_type_val_str(this, str);
-    DBUG_ASSERT(null_value == (res == NULL));
-    return res;
-  }
+  double val_real() override;
+  longlong val_int() override;
+  my_decimal *val_decimal(my_decimal *dec) override;
+  String *val_str(String*str) override;
+
   bool get_date(THD *thd, MYSQL_TIME *to, date_mode_t mode) override
   {
     DBUG_ASSERT(fixed());

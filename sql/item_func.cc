@@ -825,6 +825,57 @@ bool Item_func_plus::fix_length_and_dec(void)
   DBUG_RETURN(FALSE);
 }
 
+double Item_func_hybrid_field_type::val_real()
+{
+  DBUG_ASSERT(fixed());
+  if (check_stack_overrun(current_thd, STACK_MIN_SIZE, NULL))
+  {
+    null_value= true;
+    return 0.0;
+  }
+  return Item_func_hybrid_field_type::type_handler()->
+         Item_func_hybrid_field_type_val_real(this);
+}
+
+longlong Item_func_hybrid_field_type::val_int()
+{
+  DBUG_ASSERT(!is_cond());
+  DBUG_ASSERT(fixed());
+  if (check_stack_overrun(current_thd, STACK_MIN_SIZE, NULL))
+  {
+    null_value= true;
+    return 0;
+  }
+  return Item_func_hybrid_field_type::type_handler()->
+         Item_func_hybrid_field_type_val_int(this);
+}
+
+my_decimal *Item_func_hybrid_field_type::val_decimal(my_decimal *dec)
+{
+  uchar buff[STACK_BUFF_ALLOC];
+  DBUG_ASSERT(fixed());
+  if (check_stack_overrun(current_thd, STACK_MIN_SIZE, buff))
+  {
+    null_value= true;
+    return NULL;
+  }
+  return Item_func_hybrid_field_type::type_handler()->
+         Item_func_hybrid_field_type_val_decimal(this, dec);
+}
+
+String *Item_func_hybrid_field_type::val_str(String*str)
+{
+  DBUG_ASSERT(fixed());
+  if (check_stack_overrun(current_thd, STACK_MIN_SIZE, NULL))
+  {
+    null_value= true;
+    return NULL;
+  }
+  String *res= Item_func_hybrid_field_type::type_handler()->
+               Item_func_hybrid_field_type_val_str(this, str);
+  DBUG_ASSERT(null_value == (res == NULL));
+  return res;
+}
 
 String *Item_func_hybrid_field_type::val_str_from_int_op(String *str)
 {

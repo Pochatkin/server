@@ -59,6 +59,7 @@ public:
   sys_var *next;
   LEX_CSTRING name;
   bool *test_load;
+  bool is_loaded_forever();
   enum flag_enum { GLOBAL, SESSION, ONLY_SESSION, SCOPE_MASK=1023,
                    READONLY=1024, ALLOCATED=2048, PARSE_EARLY=4096,
                    NO_SET_STATEMENT=8192, AUTO_SET=16384};
@@ -238,6 +239,7 @@ protected:
     int for SHOW_INT, longlong for SHOW_LONGLONG, etc).
   */
   virtual const uchar *session_value_ptr(THD *thd, const LEX_CSTRING *base) const;
+  virtual const uchar *session_no_lock_value_ptr(THD *thd, const LEX_CSTRING *base) const;
   virtual const uchar *global_value_ptr(THD *thd, const LEX_CSTRING *base) const;
 
   /**

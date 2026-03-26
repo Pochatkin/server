@@ -92,6 +92,16 @@ bool Session_sysvars_tracker::vars_list::insert(const sys_var *svar)
   node->m_svar= (sys_var *)svar;
   node->test_load= node->m_svar->test_load;
   node->m_changed= false;
+  /*
+    No need to lock LOCK_plugin for non-plugin variables.
+  */
+  node->skip_plugin_lock= node->m_svar->is_loaded_forever();
+  /*
+    No need to lock LOCK_global_system_variables for session or
+    session/global variables
+  */
+  node->skip_global_lock= (node->m_svar->scope() == sys_var::SESSION);
+
   if (my_hash_insert(&m_registered_sysvars, (uchar *) node))
   {
     my_free(node);
@@ -438,30 +448,34 @@ bool Session_sysvars_tracker::vars_list::store(THD *thd, String *buf)
     SHOW_VAR show;
     CHARSET_INFO *charset;
     size_t val_length, length;
-    mysql_mutex_lock(&LOCK_global_system_variables);
-    mysql_mutex_lock(&LOCK_plugin);
+    if (!node->skip_global_lock)
+      mysql_mutex_lock(&LOCK_global_system_variables);
+    if (!node->skip_plugin_lock)
+      mysql_mutex_lock(&LOCK_plugin);
     if (!*node->test_load)
     {
+      DBUG_ASSERT(!node->skip_plugin_lock);
       mysql_mutex_unlock(&LOCK_plugin);
-      mysql_mutex_unlock(&LOCK_global_system_variables);
+      if (!node->skip_global_lock)
+        mysql_mutex_unlock(&LOCK_global_system_variables);
       continue;
     }
     sys_var *svar= node->m_svar;
-    bool is_plugin= svar->cast_pluginvar();
-    if (!is_plugin)
-      mysql_mutex_unlock(&LOCK_plugin);
 
     /* As its always system variable. */
     show.type= SHOW_SYS;
     show.name= svar->name.str;
     show.value= (char *) svar;
 
-    const char *value= get_one_variable(thd, &show, OPT_SESSION, SHOW_SYS, NULL,
+    const enum enum_var_type vtype=
+      node->skip_global_lock ? SHOW_OPT_SESSION_NO_LOCK : OPT_SESSION;
+    const char *value= get_one_variable(thd, &show, vtype, SHOW_SYS, NULL,
                                         &charset, val_buf, &val_length);
 
-    if (is_plugin)
+    if (!node->skip_plugin_lock)
       mysql_mutex_unlock(&LOCK_plugin);
-    mysql_mutex_unlock(&LOCK_global_system_variables);
+    if (!node->skip_global_lock)
+      mysql_mutex_unlock(&LOCK_global_system_variables);
 
     length= net_length_size(svar->name.length) +
       svar->name.length +

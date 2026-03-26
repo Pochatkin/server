@@ -2234,6 +2234,7 @@ void Field::make_send_field(Send_field *field)
   field->col_name= field_name;
   field->length=field_length;
   field->set_handler(type_handler());
+  field->type_handler()->Item_append_extended_type_info(field, NULL);
   field->flags=table->maybe_null ? (flags & ~NOT_NULL_FLAG) : flags;
   field->decimals= 0;
 }

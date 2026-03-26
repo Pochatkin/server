@@ -58,6 +58,13 @@ public:
   bool Item_hybrid_func_fix_attributes(THD *thd, const LEX_CSTRING &func_name,
          Type_handler_hybrid_field_type *handler, Type_all_attributes *func,
          Item **items, uint nitems) const override;
+  bool Item_append_extended_type_info(Send_field_extended_metadata *to,
+                                      const Item *item) const override
+  {
+    static const Lex_cstring fmt(STRING_WITH_LEN("xml"));
+    return to->set_format_name(fmt);
+  }
+
 
   const Type_handler *type_handler_for_tmp_table(const Item *item) const
     override;

@@ -302,7 +302,7 @@ private:
     std::string path{target};
     path.push_back('/');
     path.append(node->name);
-    if (!CopyFileExA(node->name, path.c_str(), nullptr, nullptr, false,
+    if (!CopyFileExA(node->name, path.c_str(), nullptr, nullptr, nullptr,
                      COPY_FILE_NO_BUFFERING))
     {
       /* TODO: try_mkdir */
